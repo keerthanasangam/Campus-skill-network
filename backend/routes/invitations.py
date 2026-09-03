@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from pydantic import BaseModel
+from database.databricks import get_connection
 
 router = APIRouter(
     prefix="/invitations",
@@ -7,131 +7,165 @@ router = APIRouter(
 )
 
 
-class InvitationRequest(BaseModel):
-    sender_id: str
-    receiver_id: str
-    opportunity_id: str
-    message: str = ""
-
-
-# Temporary invitation storage
-invitations = []
-
-
-# Send invitation
-@router.post("/")
-def send_invitation(invitation: InvitationRequest):
-
-    new_invitation = {
-        "invitation_id": f"INV{len(invitations) + 1:03d}",
-        "sender_id": invitation.sender_id,
-        "receiver_id": invitation.receiver_id,
-        "opportunity_id": invitation.opportunity_id,
-        "message": invitation.message,
-        "status": "pending"
-    }
-
-    invitations.append(new_invitation)
-
-    return {
-        "success": True,
-        "message": "Invitation sent successfully",
-        "data": {
-            "invitation": new_invitation
-        }
-    }
-
-
-# Get invitations received by a user
 @router.get("/{user_id}")
 def get_invitations(user_id: str):
 
-    user_invitations = [
-        invitation
-        for invitation in invitations
-        if invitation["receiver_id"] == user_id
-    ]
+    connection = get_connection()
+    cursor = connection.cursor()
 
-    return {
-        "success": True,
-        "message": "Invitations retrieved successfully",
-        "data": {
-            "user_id": user_id,
-            "count": len(user_invitations),
-            "invitations": user_invitations
+    try:
+        query = """
+        SELECT
+            invitation_id,
+            team_id,
+            sender_id,
+            receiver_id,
+            message,
+            status,
+            created_at,
+            responded_at
+        FROM workspace.default.invitations
+        WHERE receiver_id = ?
+        ORDER BY created_at DESC
+        """
+
+        cursor.execute(query, (user_id,))
+        rows = cursor.fetchall()
+
+        invitations = []
+
+        for row in rows:
+            invitations.append({
+                "invitation_id": row[0],
+                "team_id": row[1],
+                "sender_id": row[2],
+                "receiver_id": row[3],
+                "message": row[4],
+                "status": row[5],
+                "created_at": row[6],
+                "responded_at": row[7]
+            })
+
+        return {
+            "success": True,
+            "message": "Invitations retrieved successfully",
+            "data": {
+                "user_id": user_id,
+                "count": len(invitations),
+                "invitations": invitations
+            }
         }
-    }
+
+    finally:
+        cursor.close()
+        connection.close()
 
 
-# Accept invitation
 @router.patch("/{invitation_id}/accept")
 def accept_invitation(invitation_id: str):
 
-    for invitation in invitations:
+    connection = get_connection()
+    cursor = connection.cursor()
 
-        if invitation["invitation_id"] == invitation_id:
+    try:
+        cursor.execute("""
+            SELECT invitation_id, status
+            FROM workspace.default.invitations
+            WHERE invitation_id = ?
+        """, (invitation_id,))
 
-            if invitation["status"] != "pending":
-                return {
-                    "success": False,
-                    "message": "Invitation has already been processed",
-                    "data": {
-                        "invitation_id": invitation_id,
-                        "status": invitation["status"]
-                    }
-                }
+        row = cursor.fetchone()
 
-            invitation["status"] = "accepted"
-
+        if not row:
             return {
-                "success": True,
-                "message": "Invitation accepted successfully",
+                "success": False,
+                "message": "Invitation not found",
                 "data": {
-                    "invitation": invitation
+                    "invitation_id": invitation_id
                 }
             }
 
-    return {
-        "success": False,
-        "message": "Invitation not found",
-        "data": {
-            "invitation_id": invitation_id
+        if row[1] != "PENDING":
+            return {
+                "success": False,
+                "message": "Invitation has already been processed",
+                "data": {
+                    "invitation_id": invitation_id,
+                    "status": row[1]
+                }
+            }
+
+        cursor.execute("""
+            UPDATE workspace.default.invitations
+            SET status = 'ACCEPTED',
+                responded_at = current_timestamp()
+            WHERE invitation_id = ?
+        """, (invitation_id,))
+
+        return {
+            "success": True,
+            "message": "Invitation accepted successfully",
+            "data": {
+                "invitation_id": invitation_id,
+                "status": "ACCEPTED"
+            }
         }
-    }
+
+    finally:
+        cursor.close()
+        connection.close()
 
 
-# Reject invitation
 @router.patch("/{invitation_id}/reject")
 def reject_invitation(invitation_id: str):
 
-    for invitation in invitations:
+    connection = get_connection()
+    cursor = connection.cursor()
 
-        if invitation["invitation_id"] == invitation_id:
+    try:
+        cursor.execute("""
+            SELECT invitation_id, status
+            FROM workspace.default.invitations
+            WHERE invitation_id = ?
+        """, (invitation_id,))
 
-            if invitation["status"] != "pending":
-                return {
-                    "success": False,
-                    "message": "Invitation has already been processed",
-                    "data": {
-                        "invitation_id": invitation_id,
-                        "status": invitation["status"]
-                    }
-                }
+        row = cursor.fetchone()
 
-            invitation["status"] = "rejected"
-
+        if not row:
             return {
-                "success": True,
-                "message": "Invitation rejected successfully",
+                "success": False,
+                "message": "Invitation not found",
                 "data": {
-                    "invitation": invitation
+                    "invitation_id": invitation_id
                 }
             }
 
-    return {
-        "success": False,
-        "message": "Invitation not found",
-        "data": {
-            "invitation_id": invitation_id
+        if row[1] != "PENDING":
+            return {
+                "success": False,
+                "message": "Invitation has already been processed",
+                "data": {
+                    "invitation_id": invitation_id,
+                    "status": row[1]
+                }
+            }
+
+        cursor.execute("""
+            UPDATE workspace.default.invitations
+            SET status = 'REJECTED',
+                responded_at = current_timestamp()
+            WHERE invitation_id = ?
+        """, (invitation_id,))
+
+        return {
+            "success": True,
+            "message": "Invitation rejected successfully",
+            "data": {
+                "invitation_id": invitation_id,
+                "status": "REJECTED"
+            }
         }
-    }
+
+    finally:
+        cursor.close()
+        connection.close()

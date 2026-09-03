@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
+from database.databricks import get_connection
 
 router = APIRouter(
     prefix="/teams",
@@ -9,98 +10,64 @@ router = APIRouter(
 
 class TeamRequest(BaseModel):
     team_name: str
-    opportunity_id: str
-    created_by: str
+    project_id: str
+    team_leader_id: str
+    max_size: int = 5
 
 
 class TeamMemberRequest(BaseModel):
     user_id: str
+    team_role: str = "MEMBER"
 
 
-# Temporary team storage
-teams = []
-
-
-# Create a team
-@router.post("/")
-def create_team(team: TeamRequest):
-
-    new_team = {
-        "team_id": f"T{len(teams) + 1:03d}",
-        "team_name": team.team_name,
-        "opportunity_id": team.opportunity_id,
-        "created_by": team.created_by,
-        "members": [team.created_by]
-    }
-
-    teams.append(new_team)
-
-    return {
-        "success": True,
-        "message": "Team created successfully",
-        "data": {
-            "team": new_team
-        }
-    }
-
-
-# Get a team
 @router.get("/{team_id}")
 def get_team(team_id: str):
 
-    for team in teams:
+    connection = get_connection()
+    cursor = connection.cursor()
 
-        if team["team_id"] == team_id:
+    try:
+        query = """
+        SELECT
+            team_id,
+            project_id,
+            team_name,
+            team_leader_id,
+            max_size,
+            current_size,
+            status
+        FROM workspace.default.teams
+        WHERE team_id = ?
+        """
 
+        cursor.execute(query, (team_id,))
+        row = cursor.fetchone()
+
+        if not row:
             return {
-                "success": True,
-                "message": "Team retrieved successfully",
+                "success": False,
+                "message": "Team not found",
                 "data": {
-                    "team": team
+                    "team_id": team_id
                 }
             }
 
-    return {
-        "success": False,
-        "message": "Team not found",
-        "data": {
-            "team_id": team_id
+        team = {
+            "team_id": row[0],
+            "project_id": row[1],
+            "team_name": row[2],
+            "team_leader_id": row[3],
+            "max_size": row[4],
+            "current_size": row[5],
+            "status": row[6]
         }
-    }
 
-
-# Add team member
-@router.post("/{team_id}/members")
-def add_team_member(team_id: str, member: TeamMemberRequest):
-
-    for team in teams:
-
-        if team["team_id"] == team_id:
-
-            if member.user_id in team["members"]:
-
-                return {
-                    "success": False,
-                    "message": "User is already a member of this team",
-                    "data": {
-                        "team": team
-                    }
-                }
-
-            team["members"].append(member.user_id)
-
-            return {
-                "success": True,
-                "message": "Member added successfully",
-                "data": {
-                    "team": team
-                }
-            }
-
-    return {
-        "success": False,
-        "message": "Team not found",
-        "data": {
-            "team_id": team_id
+        return {
+            "success": True,
+            "message": "Team retrieved successfully",
+            "data": team
         }
-    }
+
+    finally:
+        cursor.close()
+        connection.close()

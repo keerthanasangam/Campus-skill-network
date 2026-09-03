@@ -1,0 +1,7 @@
+fastapi==0.141.1
+uvicorn==0.52.0
+requests==2.34.2
+python-dotenv==1.2.1
+databricks-sql-connector==4.4.0
+pydantic==2.13.5
+email-validator==2.3.0

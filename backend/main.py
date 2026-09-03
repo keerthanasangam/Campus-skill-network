@@ -1,5 +1,6 @@
 from fastapi import FastAPI
-
+from fastapi.middleware.cors import CORSMiddleware
+from routes.genie import router as genie_router   
 from routes.auth import router as auth_router
 from routes.users import router as users_router
 from routes.opportunities import router as opportunities_router
@@ -11,6 +12,15 @@ app = FastAPI(
     title="Campus Skill Network API",
     description="AI-powered platform for finding the right project teammates across campus.",
     version="1.0.0"
+)
+
+# CORS - allows frontend to access backend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -26,5 +36,6 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(opportunities_router)
 app.include_router(recommendations_router)
-app.include_router(invitations_router)  
+app.include_router(invitations_router)
+app.include_router(genie_router)
 app.include_router(teams_router)
